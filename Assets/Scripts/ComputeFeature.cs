@@ -1,4 +1,5 @@
 using System;
+using UnityEngine;
 using UnityEngine.Rendering.Universal;
 
 public class ComputeFeature : ScriptableRendererFeature
@@ -8,9 +9,12 @@ public class ComputeFeature : ScriptableRendererFeature
     /// Holds the settings for render feature
     /// </summary>
     [Serializable]
-    public class ComputeSettings {
+    public class ComputeSettings
+    {
         public RenderPassEvent passEvent = RenderPassEvent.AfterRenderingOpaques;                                       // The point in the rendering pipeline where this pass should be executed.
         public ComputeAsset computeAsset;                                                                               // The compute asset to use.
+
+        public CameraData cam;
     }
 
     public ComputeSettings settings = new ComputeSettings();                                                            // The settings for this feature.
@@ -22,7 +26,7 @@ public class ComputeFeature : ScriptableRendererFeature
     /// </summary>
     public override void Create()
     {
-        if (settings.computeAsset == null) { return;}                                                                  // If the compute asset is null, return.
+        if (settings.computeAsset == null) { return; }                                                                  // If the compute asset is null, return.
 
         settings.computeAsset.Setup();                                                                                 // Setup the compute asset.
         computePass = new ComputePass(name, settings);                                                                 // Create a new compute pass.
@@ -34,8 +38,11 @@ public class ComputeFeature : ScriptableRendererFeature
     /// <param name="renderer">The renderer to add the pass to.</param>
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
-        if (settings.computeAsset == null) { return;}                                                                 // If the compute asset is null, return.
-        renderer.EnqueuePass(computePass);                                                                            // Otherwise add the pass to the render queue.
+        if (settings.computeAsset == null) { return; }
+        if (Camera.main)                                                            // If the compute asset is null, return.
+        {
+            renderer.EnqueuePass(computePass);                                                                            // Otherwise add the pass to the render queue.
+        }
     }
 
     /// <summary>
@@ -43,11 +50,11 @@ public class ComputeFeature : ScriptableRendererFeature
     /// </summary>
     void OnDisable()
     {
-        if (settings.computeAsset == null) { return;}                                                                 // If the compute asset is null, return.
+        if (settings.computeAsset == null) { return; }                                                                 // If the compute asset is null, return.
         settings.computeAsset.Cleanup();                                                                              // Clean up the compute asset.
     }
 
- 
 
-    
+
+
 }

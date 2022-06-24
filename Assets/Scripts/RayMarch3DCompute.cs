@@ -22,7 +22,7 @@ public class RayMarch3DCompute : ComputeAsset
     /// </summary>
     public override void Setup()
     {
-        cam = Camera.current;
+        cam = Camera.main;                                                                     // Get the main camera.
         lightSource = FindObjectOfType<Light>();
 
     }
@@ -39,51 +39,51 @@ public class RayMarch3DCompute : ComputeAsset
     /// <summary>
     /// Creates the scene data for the compute shader
     /// </summary>
- void CreateScene () {
-        List<Shape> allShapes = new List<Shape> (FindObjectsOfType<Shape> ());                             // Get all the shapes in the scene.
-        allShapes.Sort ((a, b) => a.operation.CompareTo (b.operation));                                    // Sort the shapes by operation.
+    void CreateScene () {
+            List<Shape> allShapes = new List<Shape> (FindObjectsOfType<Shape> ());                             // Get all the shapes in the scene.
+            allShapes.Sort ((a, b) => a.operation.CompareTo (b.operation));                                    // Sort the shapes by operation.
 
-        List<Shape> orderedShapes = new List<Shape> ();                                                    // Create a new orderec list of shapes.
+            List<Shape> orderedShapes = new List<Shape> ();                                                    // Create a new orderec list of shapes.
 
-        for (int i = 0; i < allShapes.Count; i++) {                                                         // For each shape in the scene.
-            // Add top-level shapes (those without a parent)
-            if (allShapes[i].transform.parent == null) {                                                    // If the shape has no parent.
+            for (int i = 0; i < allShapes.Count; i++) {                                                         // For each shape in the scene.
+                // Add top-level shapes (those without a parent)
+                if (allShapes[i].transform.parent == null) {                                                    // If the shape has no parent.
 
-                Transform parentShape = allShapes[i].transform;                                             // Get the transform of the shape.
-                orderedShapes.Add (allShapes[i]);                                                           // Add the shape to the ordered list
-                allShapes[i].numChildren = parentShape.childCount;                                         // Set the number of children of the shape.                                   
-                // Add all children of the shape (nested children not supported currently)
-                for (int j = 0; j < parentShape.childCount; j++) {                                         // For each child of the shape.
-                    if (parentShape.GetChild (j).GetComponent<Shape> () != null) {                         // If the child is a shape.
-                        orderedShapes.Add (parentShape.GetChild (j).GetComponent<Shape> ());                // Add the shape to the ordered list.
-                        orderedShapes[orderedShapes.Count - 1].numChildren = 0;                             // Set the number of children of the shape to 0 as we don't support nested children.
+                    Transform parentShape = allShapes[i].transform;                                             // Get the transform of the shape.
+                    orderedShapes.Add (allShapes[i]);                                                           // Add the shape to the ordered list
+                    allShapes[i].numChildren = parentShape.childCount;                                         // Set the number of children of the shape.                                   
+                    // Add all children of the shape (nested children not supported currently)
+                    for (int j = 0; j < parentShape.childCount; j++) {                                         // For each child of the shape.
+                        if (parentShape.GetChild (j).GetComponent<Shape> () != null) {                         // If the child is a shape.
+                            orderedShapes.Add (parentShape.GetChild (j).GetComponent<Shape> ());                // Add the shape to the ordered list.
+                            orderedShapes[orderedShapes.Count - 1].numChildren = 0;                             // Set the number of children of the shape to 0 as we don't support nested children.
+                        }
                     }
                 }
+
             }
 
+            ShapeData[] shapeData = new ShapeData[orderedShapes.Count];                                        // Create a new array of shape data.
+            for (int i = 0; i < orderedShapes.Count; i++) {                                                   // For each shape in the ordered list of shapes.
+                var s = orderedShapes[i];                                                                      // Get the shape.
+                Vector3 col = new Vector3 (s.colour.r, s.colour.g, s.colour.b);                               // Get the colour of the shape.
+                shapeData[i] = new ShapeData () {                                                             // Create a new shape data object.
+                    position = s.Position,                                                                    // Set the shape data position to the position of the shape.
+                    scale = s.Scale, colour = col,                                                            // Set the shape data scale and colour to the scale and colour of the shape.
+                    shapeType = (int) s.shapeType,                                                            // Set the shape data shape type to the shape type of the shape.
+                    operation = (int) s.operation,                                                            // Set the shape data operation to the operation of the shape.
+                    blendStrength = s.blendStrength*3,                                                        // Set the shape data blend strength to the blend strength of the shape.
+                    numChildren = s.numChildren                                                               // Set the shape data number of children to the number of children of the shape.
+                };
+            }
+
+            ComputeBuffer shapeBuffer = new ComputeBuffer (shapeData.Length, ShapeData.GetSize ());           // Create a new compute buffer for the shape data.
+            shapeBuffer.SetData (shapeData);                                                                  // Set the data of the compute buffer to the shape data.
+            shader.SetBuffer (0, "shapes", shapeBuffer);                                                 // Set the shape buffer of the compute shader.  
+            shader.SetInt ("numShapes", shapeData.Length);                                               // Set the number of shapes in the scene on the compute shader.
+
+            buffersToDispose.Add (shapeBuffer);                                                               // Add the shape buffer to the list of buffers to dispose of.
         }
-
-        ShapeData[] shapeData = new ShapeData[orderedShapes.Count];                                        // Create a new array of shape data.
-        for (int i = 0; i < orderedShapes.Count; i++) {                                                   // For each shape in the ordered list of shapes.
-            var s = orderedShapes[i];                                                                      // Get the shape.
-            Vector3 col = new Vector3 (s.colour.r, s.colour.g, s.colour.b);                               // Get the colour of the shape.
-            shapeData[i] = new ShapeData () {                                                             // Create a new shape data object.
-                position = s.Position,                                                                    // Set the shape data position to the position of the shape.
-                scale = s.Scale, colour = col,                                                            // Set the shape data scale and colour to the scale and colour of the shape.
-                shapeType = (int) s.shapeType,                                                            // Set the shape data shape type to the shape type of the shape.
-                operation = (int) s.operation,                                                            // Set the shape data operation to the operation of the shape.
-                blendStrength = s.blendStrength*3,                                                        // Set the shape data blend strength to the blend strength of the shape.
-                numChildren = s.numChildren                                                               // Set the shape data number of children to the number of children of the shape.
-            };
-        }
-
-        ComputeBuffer shapeBuffer = new ComputeBuffer (shapeData.Length, ShapeData.GetSize ());           // Create a new compute buffer for the shape data.
-        shapeBuffer.SetData (shapeData);                                                                  // Set the data of the compute buffer to the shape data.
-        shader.SetBuffer (0, "shapes", shapeBuffer);                                                 // Set the shape buffer of the compute shader.  
-        shader.SetInt ("numShapes", shapeData.Length);                                               // Set the number of shapes in the scene on the compute shader.
-
-        buffersToDispose.Add (shapeBuffer);                                                               // Add the shape buffer to the list of buffers to dispose of.
-    }
 
     /// <summary>
     /// Sets the parameters of the compute shader
