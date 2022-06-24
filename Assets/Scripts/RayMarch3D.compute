@@ -3,10 +3,15 @@
 // VARIABLES
 //--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Texture2D<float4> Source;                                                  // The source texture - the input image                                        
+Texture2D<float4> DepthTex;                                                // The Camera Depth Texture
 RWTexture2D<float4> Destination;                                           // The destination texture - the output image
 
 float4x4 _CameraToWorld;                                                   // The camera to world matrix allowing us to transform from camera space to world space
 float4x4 _CameraInverseProjection;                                         // The inverse of the camera projection matrix allowing us to transform from screen space to camera space
+
+
+float _NearClip;                                                            // The near clip plane of the camera
+float _FarClip;                                                            // The far clip plane of the camera
 
 float3 _Light;                                                             // The light position in world space
 bool positionLight;                                                        // Whether the light is positional or directional 
@@ -223,6 +228,25 @@ float CalculateShadow(Ray ray, float dstToShadePoint) {
     return shadowIntensity + (1-shadowIntensity) * brightness;                                      // Returns the shadow intensity plus the brightness times the inverse of the brightness
 }
 
+// Calculates the depth of the ray
+float LinearEyeDepth( float rawdepth )
+    {
+        float x, y, z, w;
+    #if SHADER_API_GLES3 // insted of UNITY_REVERSED_Z
+        x = -1.0 + _NearClip/ _FarClip;
+        y = 1;
+        z = x / _NearClip;
+        w = 1 / _NearClip;
+    #else
+        x = 1.0 - _NearClip/ _FarClip;
+        y = _NearClip / _FarClip;
+        z = x / _NearClip;
+        w = y / _NearClip;
+   #endif
+    
+    return 1.0 / (z * rawdepth + w);
+}
+
 //--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 // The main function
 //--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -231,21 +255,29 @@ float CalculateShadow(Ray ray, float dstToShadePoint) {
 void CSMain (uint3 id : SV_DispatchThreadID)
 {
     uint width,height;
+    
     Destination.GetDimensions(width, height);                                                        // Gets the width and height of the render target
 
     Destination[id.xy] = Source[id.xy];                                                              // Sets the pixel at the current thread's coordinates to the pixel at the same coordinates in the source    
 
     float2 uv = id.xy / float2(width,height) * 2 - 1;                                                // Gets the uv coordinates of the current thread's coordinates
     float rayDst = 0;
-
+    float depth = LinearEyeDepth(DepthTex[uv.xy].r);                                                // Gets the depth of the pixel at the current thread's coordinates
     Ray ray = CreateCameraRay(uv);                                                                   // Creates a ray from the camera at the current thread's coordinates
     int marchSteps = 0;                                                                              // Initializes the number of steps to 0 to keep track of the number of steps
 
     while (rayDst < maxDst) {                                                                        // While the ray distance is less than the maximum distance the ray can travel
         marchSteps ++;                                                                               // Increments the number of steps
         float4 sceneInfo = SceneInfo(ray.origin);                                                    // Gets the scene info at the ray origin
-        float dst = sceneInfo.w;                                                                    // Gets the distance from the ray origin to the scene
+        float dst = sceneInfo.w;
+        depth = depth * dst;                                                                    // Gets the distance from the ray origin to the scene
         
+        if (dst >= depth)
+        {
+            Destination[id.xy] = float4(sceneInfo.xyz, 1);
+            break;                                                                         // Breaks out of the loop if the ray hits the scene
+        }
+
         if (dst <= epsilon) {                                                                       // If the distance is less than epsilon (effecitvely zero)
             float3 pointOnSurface = ray.origin + ray.direction * dst;                               // Gets the point on the surface of the scene
             float3 normal = EstimateNormal(pointOnSurface - ray.direction * epsilon);               // Gets the normal of the point on the surface

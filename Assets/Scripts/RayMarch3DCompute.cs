@@ -94,7 +94,9 @@ public class RayMarch3DCompute : ComputeAsset
         shader.SetMatrix("_CameraToWorld", cam.cameraToWorldMatrix);
         shader.SetMatrix("_CameraInverseProjection", cam.projectionMatrix.inverse);
         shader.SetVector("_Light", (lightIsDirectional) ? lightSource.transform.forward : lightSource.transform.position);
-        shader.SetBool("positionLight", !lightIsDirectional);
+        shader.SetFloat("_NearClip", cam.nearClipPlane);
+        shader.SetFloat("_FarClip", cam.farClipPlane);
+        shader.SetBool("positionLight", !lightIsDirectional);        
     }
 
    struct ShapeData {

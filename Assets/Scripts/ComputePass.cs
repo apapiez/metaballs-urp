@@ -12,6 +12,7 @@ public class ComputePass : ScriptableRenderPass
     private readonly int TargetBufferID = Shader.PropertyToID("targetBuffer");                         // The UID of the target buffer write-to by the compute shader.
 
     private readonly int ConvergedBufferID = Shader.PropertyToID("convergedBuffer");
+
     private Material addMaterial;
     private int currentSample;
 
@@ -48,9 +49,9 @@ public class ComputePass : ScriptableRenderPass
             cmd.GetTemporaryRT(TemporaryBufferID, renderingData.cameraData.camera.pixelWidth, renderingData.cameraData.camera.pixelHeight, 0, FilterMode.Point, RenderTextureFormat.ARGB32);
             cmd.GetTemporaryRT(TargetBufferID, renderingData.cameraData.camera.pixelWidth, renderingData.cameraData.camera.pixelHeight, 0, FilterMode.Point, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Default, 1, true, RenderTextureMemoryless.None , false);
             //new temporary render texture with UAV flag set
-            Blit(cmd, renderer.cameraColorTarget, TemporaryBufferID);
             cmd.SetComputeTextureParam(computeAsset.shader, kernelHandle, "Destination", TargetBufferID);
             cmd.SetComputeTextureParam(computeAsset.shader, kernelHandle, "Source", TemporaryBufferID);                                             // Set the shader parameters according to the current scene state
+            cmd.SetComputeTextureParam(computeAsset.shader, kernelHandle,  "DepthTex", Shader.GetGlobalTexture("_CameraDepthTexture"));
             cmd.DispatchCompute(computeAsset.shader, kernelHandle, Mathf.CeilToInt(Screen.width / 8), Mathf.CeilToInt(Screen.height / 8), 1); // Dispatch the compute shader
             if (addMaterial == null)
             {
