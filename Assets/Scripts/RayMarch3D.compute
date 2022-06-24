@@ -1,0 +1,282 @@
+#pragma kernel CSMain                                                      // Denotes the main function of the shader
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// VARIABLES
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Texture2D<float4> Source;                                                  // The source texture - the input image                                        
+RWTexture2D<float4> Destination;                                           // The destination texture - the output image
+
+float4x4 _CameraToWorld;                                                   // The camera to world matrix allowing us to transform from camera space to world space
+float4x4 _CameraInverseProjection;                                         // The inverse of the camera projection matrix allowing us to transform from screen space to camera space
+
+float3 _Light;                                                             // The light position in world space
+bool positionLight;                                                        // Whether the light is positional or directional 
+
+static const float maxDst = 80;                                            // The maximum distance to travel when tracing a ray
+static const float epsilon = 0.001f;                                       // The epsilon value used to prevent division by zero
+static const float shadowBias = epsilon * 50;                              // The bias value used to prevent shadow acne
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// STRUCT DEFINITIONS - data types to represent the input and output of the shader
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// Shape struct - represents a shape in the scene
+struct Shape {
+    
+    float3 position;                                                       // The position of the shape in world space                
+    float3 size;                                                           // The size of the shape
+    float3 colour;                                                         // The colour of the shape
+    int shapeType;                                                         // The type of shape - 0 = sphere, 1 = cube, 2 = cylinder, 3 = cone    
+    int operation;                                                         // The operation to perform on the shape - 0 = add, 1 = subtract, 2 = multiply, 3 = divide
+    float blendStrength;                                                   // The strength of the blend operation
+    int numChildren;                                                       // The number of children the shape has
+};
+
+StructuredBuffer<Shape> shapes;                                           // The structured buffer containing the shapes in the scene
+int numShapes;                                                            // The number of shapes in the scene
+
+// Structure for the ray data
+struct Ray {
+    float3 origin;                                                         // The origin of the ray
+    float3 direction;                                                      // The direction of the ray
+};
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// SIGNED DISTANCE FUNCTIONS - calculates the signed distance from a ray to a shape
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+float SphereDistance(float3 eye, float3 centre, float radius) {
+    return distance(eye, centre) - radius;
+}
+
+float CubeDistance(float3 eye, float3 centre, float3 size) {
+    float3 o = abs(eye-centre) -size;
+    float ud = length(max(o,0));
+    float n = max(max(min(o.x,0),min(o.y,0)), min(o.z,0));
+    return ud+n;
+}
+
+// Following distance functions from http://iquilezles.org/www/articles/distfunctions/distfunctions.htm
+float TorusDistance(float3 eye, float3 centre, float r1, float r2)
+{   
+    float2 q = float2(length((eye-centre).xz)-r1,eye.y-centre.y);
+    return length(q)-r2;
+}
+
+float PrismDistance(float3 eye, float3 centre, float2 h) {
+    float3 q = abs(eye-centre);
+    return max(q.z-h.y,max(q.x*0.866025+eye.y*0.5,-eye.y)-h.x*0.5);
+}
+
+
+float CylinderDistance(float3 eye, float3 centre, float2 h) {
+    float2 d = abs(float2(length((eye).xz), eye.y)) - h;
+    return length(max(d,0.0)) + max(min(d.x,0),min(d. y,0));
+}
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// RAY GENERATING FUNCTIONS 
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// Creates a ray from the camera in the given direction
+Ray CreateRay(float3 origin, float3 direction) {
+    Ray ray;                                                              // The ray to be created
+    ray.origin = origin;                                                  // The origin of the ray is the camera position           
+    ray.direction = direction;                                            // The direction of the ray is the given direction
+    return ray;                                                           // Returns a ray structre
+}
+
+// Given a UV coordinate, returns a ray from the camera in the direction of the pixel
+Ray CreateCameraRay(float2 uv) {
+    float3 origin = mul(_CameraToWorld, float4(0,0,0,1)).xyz;             // The origin of the ray is the camera position converted to world space
+    float3 direction = mul(_CameraInverseProjection, float4(uv,0,1)).xyz; // The direction of the ray is the direction of the pixel, located on the screen plane converted to camera space
+    direction = mul(_CameraToWorld, float4(direction,0)).xyz;             // The direction of the ray is converted to world space
+    direction = normalize(direction);                                     // the vector is normalized as direction vectors are unit vectors by convention
+    return CreateRay(origin,direction);                                   // Calls the ray generating function to create the ray, returning a ray structure
+}
+
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// Blend operation functions
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+//blends two shapes together
+// polynomial smooth min (k = 0.1);
+// from https://www.iquilezles.org/www/articles/smin/smin.htm
+float4 Blend( float a, float b, float3 colA, float3 colB, float k )
+{
+    float h = clamp( 0.5+0.5*(b-a)/k, 0.0, 1.0 );
+    float blendDst = lerp( b, a, h ) - k*h*(1.0-h);
+    float3 blendCol = lerp(colB,colA,h);
+    return float4(blendCol, blendDst);
+}
+
+//Combines two shapes based upon the operation specified in the shape struct
+float4 Combine(float dstA, float dstB, float3 colourA, float3 colourB, int operation, float blendStrength) {
+    float dst = dstA;
+    float3 colour = colourA;
+
+    if (operation == 0) {                                                  // Add
+        if (dstB < dstA) {                                                 // If the two shapes are within range
+            dst = dstB;                                                     // The distance is the minimum distance
+            colour = colourB;                                              // The colour is the colour of the second shape
+        }
+    } 
+                                                                           
+    else if (operation == 1) {                                           // Blend                                      
+        float4 blend = Blend(dstA,dstB,colourA,colourB, blendStrength);   // Calls the blend function to blend the two shapes
+        dst = blend.w;                                                   // The distance is the blend distance
+        colour = blend.xyz;                                              // The colour is the blend colour
+    }
+     
+    else if (operation == 2) {                                            // Cut
+        // max(a,-b)
+        if (-dstB > dst)                                                  // If the second shape is closer than the first
+            dst = -dstB;                                                  // The distance is the negative distance of the second shape
+            colour = colourB;                                             // The colour is the colour of the second shape
+        }
+    
+    
+    else if (operation == 3) {                                            // Mask
+        // max(a,b)                                                       
+        if (dstB > dst) {                                                 // If the distance to the second shape is greater than the first
+            dst = dstB;                                                   // The distance is the distance to the second shape
+            colour = colourB;                                             // The colour is the colour of the second shape
+        }
+    }
+
+    return float4(colour,dst);                                            // Returns the colour and distance
+}
+
+
+// Calculates the distance from a ray to a shape
+float GetShapeDistance(Shape shape, float3 eye) {
+   
+    if (shape.shapeType == 0) {
+        return SphereDistance(eye, shape.position, shape.size.x);       // Calls the sphere distance function
+    }
+    else if (shape.shapeType == 1) {
+        return CubeDistance(eye, shape.position, shape.size);           // Calls the cube distance function
+    }
+    else if (shape.shapeType == 2) {
+        return TorusDistance(eye, shape.position, shape.size.x, shape.size.y); // Calls the torus distance function
+    }
+
+    return maxDst;                                                       // Returns a large distance if the shape type is not recognized (ray can only hit recognized shapes)
+}
+
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+// Calculates scene colour based upon the ray and shapes in the scene
+float4 SceneInfo(float3 eye) {
+    float globalDst = maxDst;                                            // Initializes the global distance to a large distance
+    float3 globalColour = 1;                                             // Initializes the global colour to white
+    
+    for (int i = 0; i < numShapes; i ++) {                               // Loop through all shapes
+        Shape shape = shapes[i];
+        int numChildren = shape.numChildren;                             // Gets the number of children of the shape
+
+        float localDst = GetShapeDistance(shape,eye);                   // Gets the distance from the ray to the shape
+        float3 localColour = shape.colour;                              // Gets the colour of the shape
+
+
+        for (int j = 0; j < numChildren; j ++) {                        // Loop through all children of the shape
+            Shape childShape = shapes[i+j+1];                           // Gets the child shape
+            float childDst = GetShapeDistance(childShape,eye);          // Gets the distance from the ray to the child shape
+
+            float4 combined = Combine(localDst, childDst, localColour, childShape.colour, childShape.operation, childShape.blendStrength); // Combines parent and child shape, using the operation and blend strength of the child
+            localColour = combined.xyz;                                // Sets the local colour to the color of the combined shape
+            localDst = combined.w;                                     // Sets the local distance to the distance of the combined shape
+        }
+        i+=numChildren;                                                // skip over children in outer loop
+        
+        float4 globalCombined = Combine(globalDst, localDst, globalColour, localColour, shape.operation, shape.blendStrength); // Combines global and local shape, using the operation and blend strength of the shape
+        globalColour = globalCombined.xyz;                             // Sets the global colour to the color of the combined shape
+        globalDst = globalCombined.w;                                  // Sets the global distance to the distance of the combined shape
+    }
+
+    return float4(globalColour, globalDst);                             // Returns the global colour and distance
+}
+
+float3 EstimateNormal(float3 p) {
+    float x = SceneInfo(float3(p.x+epsilon,p.y,p.z)).w - SceneInfo(float3(p.x-epsilon,p.y,p.z)).w;    // Calculates the x derivative
+    float y = SceneInfo(float3(p.x,p.y+epsilon,p.z)).w - SceneInfo(float3(p.x,p.y-epsilon,p.z)).w;    // Calculates the y derivative
+    float z = SceneInfo(float3(p.x,p.y,p.z+epsilon)).w - SceneInfo(float3(p.x,p.y,p.z-epsilon)).w;    // Calculates the z derivative
+    return normalize(float3(x,y,z));                                                                  // Returns the normal
+}
+
+//Calculates the shadows
+float CalculateShadow(Ray ray, float dstToShadePoint) {
+    float rayDst = 0;                                                                                 // Initializes the ray distance to 0
+    int marchSteps = 0;                                                                               // Initializes the number of steps to 0
+    float shadowIntensity = .2;                                                                       // Initializes the shadow intensity to .2
+    float brightness = 1;                                                                             // Initializes the brightness to 1
+
+    while (rayDst < dstToShadePoint) {                                                               // While the ray distance is less than the distance to the shade point
+        marchSteps ++;                                                                               // Increments the number of steps
+        float4 sceneInfo = SceneInfo(ray.origin);                                                    // Gets the scene info at the ray origin
+        float dst = sceneInfo.w;                                                                     // Gets the distance from the ray origin to the scene
+        
+        if (dst <= epsilon) {                                                                       // If the distance is less than epsilon (effecitvely zero)
+            return shadowIntensity;                                                                 // Returns the shadow intensity   
+        }
+
+        brightness = min(brightness,dst*200);                                                       // Sets the brightness to the minimum of the brightness and the distance times 200
+
+        ray.origin += ray.direction * dst;                                                          // Moves the ray origin to the next point along the ray
+        rayDst += dst;                                                                              // Increments the ray distance
+    }
+    return shadowIntensity + (1-shadowIntensity) * brightness;                                      // Returns the shadow intensity plus the brightness times the inverse of the brightness
+}
+
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// The main function
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    uint width,height;
+    Destination.GetDimensions(width, height);                                                        // Gets the width and height of the render target
+
+    Destination[id.xy] = Source[id.xy];                                                              // Sets the pixel at the current thread's coordinates to the pixel at the same coordinates in the source    
+
+    float2 uv = id.xy / float2(width,height) * 2 - 1;                                                // Gets the uv coordinates of the current thread's coordinates
+    float rayDst = 0;
+
+    Ray ray = CreateCameraRay(uv);                                                                   // Creates a ray from the camera at the current thread's coordinates
+    int marchSteps = 0;                                                                              // Initializes the number of steps to 0 to keep track of the number of steps
+
+    while (rayDst < maxDst) {                                                                        // While the ray distance is less than the maximum distance the ray can travel
+        marchSteps ++;                                                                               // Increments the number of steps
+        float4 sceneInfo = SceneInfo(ray.origin);                                                    // Gets the scene info at the ray origin
+        float dst = sceneInfo.w;                                                                    // Gets the distance from the ray origin to the scene
+        
+        if (dst <= epsilon) {                                                                       // If the distance is less than epsilon (effecitvely zero)
+            float3 pointOnSurface = ray.origin + ray.direction * dst;                               // Gets the point on the surface of the scene
+            float3 normal = EstimateNormal(pointOnSurface - ray.direction * epsilon);               // Gets the normal of the point on the surface
+            float3 lightDir = (positionLight)?normalize(_Light-ray.origin):-_Light;                 // Gets the direction of the light
+            float lighting = saturate(saturate(dot(normal,lightDir)));                              // Gets the lighting value
+            float3 col = sceneInfo.xyz;                                                             // Gets the colour of the scene
+            
+            // Shadow
+            float3 offsetPos = pointOnSurface + normal * shadowBias;                               // Gets the position of the point on the surface plus the normal times the shadow bias
+            float3 dirToLight = (positionLight)?normalize(_Light- offsetPos):-_Light;              // Gets the direction to the light
+
+            ray.origin = offsetPos;                                                                // Sets the ray origin to the offset position   
+            ray.direction = dirToLight;                                                            // Sets the ray direction to the direction to the light
+
+            float dstToLight = (positionLight)?distance(offsetPos,_Light):maxDst;                  // Gets the distance to the light
+            float shadow = CalculateShadow(ray, dstToLight);                                       // Calculates the shadow
+
+            Destination[id.xy] = float4(col * lighting * shadow ,1);                               // Set's the pixel on the output texture to the result of the lighting and shadow
+
+            break;                                                                                 // RayMarch complete, breaks out of the loop          
+        }
+
+        ray.origin += ray.direction * dst;                                                         // If we didn't hit anything, Moves the ray origin to the next point along the ray
+        rayDst += dst;                                                                             // Increments the ray distance                                                                  
+    }
+}
+
+
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// NOTES
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+// The ray march is done by creating a ray from the camera at the current thread's coordinates and marching it until it hits the maximum distance.
+// 
