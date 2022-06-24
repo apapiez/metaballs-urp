@@ -1,23 +1,5 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!114 &-7152903125360578561
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4a299cc821826a4408064ce580bab748, type: 3}
-  m_Name: Metaballs (2D)
-  m_EditorClassIdentifier: 
-  m_Active: 1
-  settings:
-    renderPassEvent: 600
-    outlineSize: 0.25
-    innerColor: {r: 0, g: 0.63284254, b: 1, a: 1}
-    outlineColor: {r: 1, g: 1, b: 1, a: 1}
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -34,9 +16,8 @@ MonoBehaviour:
     debugReplacementPS: {fileID: 4800000, guid: cf852408f2e174538bcd9b7fda1c5ae7,
       type: 3}
   m_RendererFeatures:
-  - {fileID: -7152903125360578561}
-  - {fileID: 6206412873127360065}
-  m_RendererFeatureMap: 35e6fc7e8397411141f62a08a09b2156
+  - {fileID: 5559235512652237351}
+  m_RendererFeatureMap: 278a5fa23e5f264d
   m_UseNativeRenderPass: 0
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}
   xrSystemData: {fileID: 11400000, guid: 60e1133243b97e347b653163a8c01b64, type: 2}
@@ -76,8 +57,8 @@ MonoBehaviour:
   m_AccurateGbufferNormals: 0
   m_ClusteredRendering: 0
   m_TileSize: 32
-  m_IntermediateTextureMode: 1
---- !u!114 &6206412873127360065
+  m_IntermediateTextureMode: 0
+--- !u!114 &5559235512652237351
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -92,4 +73,4 @@ MonoBehaviour:
   m_Active: 1
   settings:
     passEvent: 300
-    computeAsset: {fileID: 0}
+    computeAsset: {fileID: 11400000, guid: c9a618820d5833446a0b383dc349fd92, type: 2}

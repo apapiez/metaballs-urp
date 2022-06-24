@@ -12,4 +12,4 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cba69c0a86be1af47bbc53d51549a76f, type: 3}
   m_Name: RM3D
   m_EditorClassIdentifier: 
-  shader: {fileID: 0}
+  shader: {fileID: 7200000, guid: 79bab864b1a627343a313aa1b40748de, type: 3}
